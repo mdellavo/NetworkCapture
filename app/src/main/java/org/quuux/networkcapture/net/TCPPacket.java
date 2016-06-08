@@ -1,16 +1,12 @@
 package org.quuux.networkcapture.net;
 
-
-import org.quuux.networkcapture.Util;
-
 import java.nio.ByteBuffer;
 
-public class TCPPacket {
+public class TCPPacket extends Packet{
     public static final int PROTOCOL_NUMBER = 6;
-    private final ByteBuffer buffer;
 
     public TCPPacket(final ByteBuffer buffer) {
-        this.buffer = buffer;
+        super(buffer);
     }
 
     public int getSourcePort() {
@@ -37,14 +33,9 @@ public class TCPPacket {
         return getDataOffset() * 4;
     }
 
-    public ByteBuffer getPayload() {
-        buffer.position(getHeaderSize());
-        ByteBuffer payload = buffer.slice();
-        buffer.position(0);
-        return payload;
+    @Override
+    public String inspect() {
+        return String.format("TCP: src port=%s / dest port=%s", getSourcePort(), getDestPort());
     }
 
-    public String toHex() {
-        return Util.toHexString(buffer.array(), buffer.limit());
-    }
 }

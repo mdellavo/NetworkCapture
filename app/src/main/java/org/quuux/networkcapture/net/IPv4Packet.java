@@ -1,29 +1,17 @@
 package org.quuux.networkcapture.net;
 
-
-import org.quuux.networkcapture.Util;
-
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 
-public class IPv4Packet {
-
-    ByteBuffer buffer;
+public class IPv4Packet extends Packet {
 
     public IPv4Packet(final ByteBuffer buffer) {
-        this.buffer = buffer;
+        super(buffer);
     }
 
-    public ByteBuffer getPayload() {
-        buffer.position(getHeaderSize());
-        ByteBuffer payload = buffer.slice();
-        buffer.position(0);
-        return payload;
-    }
-
-    public ByteBuffer getBuffer() {
-        return buffer;
+    public int getHeaderSize() {
+        return getIHL() * 4;
     }
 
     public int getVersion() {
@@ -100,11 +88,45 @@ public class IPv4Packet {
         }
     }
 
-    public String toHex() {
-        return Util.toHexString(buffer.array(), buffer.limit());
+    public UDPPacket getUDPPayload() {
+        if (getProtocol() != UDPPacket.PROTOCOL_NUMBER)
+            throw new RuntimeException("not a udp packet");
+
+        return new UDPPacket(getPayload());
     }
 
-    public int getHeaderSize() {
-        return getIHL() * 4;
+    public TCPPacket getTCPPayload() {
+        if (getProtocol() != TCPPacket.PROTOCOL_NUMBER)
+            throw new RuntimeException("not a tcp packet");
+
+        return new TCPPacket(getPayload());
+    }
+
+    public Packet getPayloadPacket() {
+        int protocol = getProtocol();
+        if (protocol == UDPPacket.PROTOCOL_NUMBER)
+            return getUDPPayload();
+        else if (protocol == TCPPacket.PROTOCOL_NUMBER)
+            return getTCPPayload();
+
+        throw new RuntimeException("unknown protocol");
+    }
+
+
+    @Override
+    public String inspect() {
+        int version = getVersion();
+        int headerWords = getIHL();
+        int len = getLength();
+        int ttl = getTTL();
+
+        byte[] src = new byte[4];
+        getSource(src);
+
+        byte[] dest = new byte[4];
+        getDest(dest);
+
+        return String.format("IP: version=%s / headerWords=%s / len=%s / ttl=%s / protocol=%s / src=%s / dest=%s",
+                version, headerWords, len, ttl, getProtocolName(), formatAddress(src), formatAddress(dest));
     }
 }

@@ -6,8 +6,6 @@ import android.os.ParcelFileDescriptor;
 import android.util.Log;
 
 import org.quuux.networkcapture.net.IPv4Packet;
-import org.quuux.networkcapture.net.TCPPacket;
-import org.quuux.networkcapture.net.UDPPacket;
 
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -39,41 +37,13 @@ public class NetworkCaptureService extends VpnService {
     }
 
     private void inspectPacket(final IPv4Packet packet) {
-        int version = packet.getVersion();
-        int headerWords = packet.getIHL();
-        int len = packet.getLength();
-        int ttl = packet.getTTL();
-
-        byte[] src = new byte[4];
-        packet.getSource(src);
-
-        byte[] dest = new byte[4];
-        packet.getDest(dest);
-
-        Log.d(TAG, "IP: " + packet.toHex());
-        Log.d(TAG, String.format("IP: version=%s / headerWords=%s / len=%s / ttl=%s / protocol=%s / src=%s / dest=%s",
-                version, headerWords, len, ttl, packet.getProtocolName(), packet.formatAddress(src), packet.formatAddress(dest)));
-
-        inspectPayload(packet);
+        Log.d(TAG, "HEX:" + packet.toHex());
+        Log.d(TAG, packet.inspect());
+        Log.d(TAG, packet.getPayloadPacket().inspect());
     }
 
-    private void inspectPayload(final IPv4Packet packet) {
-        int protocol = packet.getProtocol();
-        ByteBuffer payload = packet.getPayload();
-        if (protocol == TCPPacket.PROTOCOL_NUMBER)
-            inspectTCPPacket(new TCPPacket(payload));
-        else if (protocol == UDPPacket.PROTOCOL_NUMBER)
-            inspectUDPPacket(new UDPPacket(payload));
-    }
+    private void forwardPacket(final IPv4Packet packet) {
 
-    private void inspectUDPPacket(final UDPPacket packet) {
-        Log.d(TAG, "UDP: " + packet.toHex());
-        Log.d(TAG, String.format("UDP: src port=%s / dest port=%s / length = %s", packet.getSourcePort(), packet.getDestPort(), packet.getLength()));
-    }
-
-    private void inspectTCPPacket(final TCPPacket packet) {
-        Log.d(TAG, "TCP: " + packet.toHex());
-        Log.d(TAG, String.format("TCP: src port=%s / dest port=%s", packet.getSourcePort(), packet.getDestPort()));
     }
 
     void readPacket(final FileInputStream in, final IPv4Packet packet) throws IOException {
@@ -82,6 +52,7 @@ public class NetworkCaptureService extends VpnService {
         buffer.limit(length);
         if (length > 0) {
             inspectPacket(packet);
+            forwardPacket(packet);
         }
         buffer.clear();
     }

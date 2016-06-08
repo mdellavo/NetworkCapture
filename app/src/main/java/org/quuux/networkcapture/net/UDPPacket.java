@@ -1,16 +1,13 @@
 package org.quuux.networkcapture.net;
 
-import org.quuux.networkcapture.Util;
-
 import java.nio.ByteBuffer;
 
 
-public class UDPPacket {
+public class UDPPacket extends Packet {
     public static final int PROTOCOL_NUMBER = 17;
-    private final ByteBuffer buffer;
 
     public UDPPacket(final ByteBuffer buffer) {
-        this.buffer = buffer;
+        super(buffer);
     }
 
     public int getSourcePort() {
@@ -33,14 +30,8 @@ public class UDPPacket {
         return 4 * 2;
     }
 
-    public ByteBuffer getPayload() {
-        buffer.position(getHeaderSize());
-        ByteBuffer payload = buffer.slice();
-        buffer.position(0);
-        return payload;
-    }
-
-    public String toHex() {
-        return Util.toHexString(buffer.array(), buffer.limit());
+    @Override
+    public String inspect() {
+        return String.format("UDP: src port=%s / dest port=%s / length = %s", getSourcePort(), getDestPort(), getLength());
     }
 }
