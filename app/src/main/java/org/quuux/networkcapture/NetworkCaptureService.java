@@ -6,6 +6,8 @@ import android.os.ParcelFileDescriptor;
 import android.util.Log;
 
 import org.quuux.networkcapture.net.IPv4Packet;
+import org.quuux.networkcapture.net.TCPPacket;
+import org.quuux.networkcapture.net.UDPPacket;
 
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -13,6 +15,12 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
+class NetworkConnection {
+
+
+
+
+}
 
 public class NetworkCaptureService extends VpnService {
 
@@ -39,11 +47,45 @@ public class NetworkCaptureService extends VpnService {
     private void inspectPacket(final IPv4Packet packet) {
         Log.d(TAG, "HEX:" + packet.toHex());
         Log.d(TAG, packet.inspect());
-        Log.d(TAG, packet.getPayloadPacket().inspect());
     }
 
     private void forwardPacket(final IPv4Packet packet) {
+        if (packet.isTCP()) {
+            forwardTCPPacket(packet);
+        } else if (packet.isUDP()) {
+            forwardUDPPacket(packet);
+        } else {
+         Log.d(TAG, String.format("dropping unhandled packet for protocol = %s", packet.getProtocol()));
+        }
+    }
 
+    private void forwardTCPPacket(final IPv4Packet ipPacket) {
+        final TCPPacket packet = ipPacket.getTCPPayload();
+
+        final byte[] src = new byte[4];
+        ipPacket.getSource(src);
+
+        byte[] dest = new byte[4];
+        ipPacket.getDest(dest);
+
+        if (packet.isSyn()) {
+            Log.d(TAG, String.format("tcp syn %s:%s -> %s:%s", ipPacket.formatAddress(src), packet.getSourcePort(), ipPacket.formatAddress(dest), packet.getDestPort()));
+        } else if (packet.isFin()) {
+            Log.d(TAG, String.format("tcp fin %s:%s -> %s:%s", ipPacket.formatAddress(src), packet.getSourcePort(), ipPacket.formatAddress(dest), packet.getDestPort()));
+        } else if (packet.isRst()) {
+            Log.d(TAG, String.format("tcp rst %s:%s -> %s:%s", ipPacket.formatAddress(src), packet.getSourcePort(), ipPacket.formatAddress(dest), packet.getDestPort()));
+        }
+    }
+
+    private void forwardUDPPacket(final IPv4Packet ipPacket) {
+        final UDPPacket packet = ipPacket.getUDPPayload();
+        final byte[] src = new byte[4];
+        ipPacket.getSource(src);
+
+        byte[] dest = new byte[4];
+        ipPacket.getDest(dest);
+
+        Log.d(TAG, String.format("forward udp packet %s:%s -> %s:%s", ipPacket.formatAddress(src), packet.getSourcePort(), ipPacket.formatAddress(dest), packet.getDestPort()));
     }
 
     void readPacket(final FileInputStream in, final IPv4Packet packet) throws IOException {
@@ -51,7 +93,7 @@ public class NetworkCaptureService extends VpnService {
         int length = in.read(buffer.array(), 0, buffer.capacity());
         buffer.limit(length);
         if (length > 0) {
-            inspectPacket(packet);
+            //inspectPacket(packet);
             forwardPacket(packet);
         }
         buffer.clear();

@@ -68,11 +68,19 @@ public class IPv4Packet extends Packet {
         dest[3] = buffer.get(19);
     }
 
+    public boolean isTCP() {
+        return getProtocol() == TCPPacket.PROTOCOL_NUMBER;
+    }
+
+    public boolean isUDP() {
+        return getProtocol() == UDPPacket.PROTOCOL_NUMBER;
+    }
+
     public String getProtocolName() {
         final int protocol = getProtocol();
-        if (protocol == 6)
+        if (protocol == TCPPacket.PROTOCOL_NUMBER)
             return "tcp";
-        else if (protocol == 17)
+        else if (protocol == UDPPacket.PROTOCOL_NUMBER)
             return "udp";
         else if (protocol == 1)
             return "icmp";
@@ -126,7 +134,6 @@ public class IPv4Packet extends Packet {
         byte[] dest = new byte[4];
         getDest(dest);
 
-        return String.format("IP: version=%s / headerWords=%s / len=%s / ttl=%s / protocol=%s / src=%s / dest=%s",
-                version, headerWords, len, ttl, getProtocolName(), formatAddress(src), formatAddress(dest));
+        return String.format("IP: %s -> %s / %s", formatAddress(src), formatAddress(dest), getPayloadPacket().inspect());
     }
 }
