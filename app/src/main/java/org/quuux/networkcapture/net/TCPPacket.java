@@ -22,20 +22,41 @@ public class TCPPacket extends Packet{
         super(buffer);
     }
 
+    public void setSourcePort(short src) {
+        buffer.putShort(0, src);
+    }
+
     public int getSourcePort() {
         return buffer.getShort(0) & 0xffff;
+    }
+
+    public void setDestPort(short dest) {
+        buffer.putShort(2, dest);
     }
 
     public int getDestPort() {
         return buffer.getShort(2) & 0xffff;
     }
 
+    public void putSeqNumber(int seq) {
+        buffer.putInt(4, seq);
+    }
+
     public long getSeqNumber() {
         return buffer.getInt(4);
     }
 
+    public void putAckNumber(int ack) {
+        buffer.putInt(8, ack);
+    }
+
     public long getAckNumber() {
         return buffer.getInt(8);
+    }
+
+    public void setDataOffsetAndFlags(byte offset, short flags) {
+        short s = (short) (((offset & 0xf) << 4) | (flags & 0x1ff));
+        buffer.putShort(12, s);
     }
 
     public int getDataOffset() {

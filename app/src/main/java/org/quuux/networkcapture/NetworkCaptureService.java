@@ -5,33 +5,44 @@ import android.net.VpnService;
 import android.os.ParcelFileDescriptor;
 import android.util.Log;
 
+import org.quuux.networkcapture.net.Forwarder;
 import org.quuux.networkcapture.net.IPv4Packet;
-import org.quuux.networkcapture.net.TCPPacket;
-import org.quuux.networkcapture.net.UDPPacket;
+import org.quuux.networkcapture.net.NetworkConnection;
+import org.quuux.networkcapture.net.TCPForwarder;
+import org.quuux.networkcapture.net.UDPForwarder;
 
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 
-class NetworkConnection {
-
-
-
-
-}
 
 public class NetworkCaptureService extends VpnService {
 
     private static final String TAG = "NetworkCaptureService";
 
-    CaptureThread workerThread;
+    BlockingQueue<IPv4Packet> outbound = new LinkedBlockingQueue<>();
+
+    CaptureThread captureThread;
+    WriterThread writerThread;
+    Map<NetworkConnection, Forwarder> forwarders = new HashMap<>();
+    ParcelFileDescriptor iface;
 
     @Override
     public int onStartCommand(final Intent intent, final int flags, final int startId) {
-        workerThread = new CaptureThread();
-        workerThread.start();
+
+        iface = configure();
+
+        captureThread = new CaptureThread(iface);
+        captureThread.start();
+
+        writerThread = new WriterThread(iface, outbound);
+        writerThread.start();
 
         return START_STICKY;
     }
@@ -40,6 +51,8 @@ public class NetworkCaptureService extends VpnService {
         return new VpnService.Builder()
                 .addAddress("10.0.0.1", 24)
                 .addRoute("0.0.0.0", 0)
+                .addDnsServer("8.8.8.8")
+                .addDnsServer("8.8.4.4")
                 .setSession("capture")
                 .establish();
     }
@@ -49,43 +62,42 @@ public class NetworkCaptureService extends VpnService {
         Log.d(TAG, packet.inspect());
     }
 
-    private void forwardPacket(final IPv4Packet packet) {
-        if (packet.isTCP()) {
-            forwardTCPPacket(packet);
-        } else if (packet.isUDP()) {
-            forwardUDPPacket(packet);
+    private Forwarder createForwarder(final NetworkConnection nc) {
+        Forwarder forwarder = null;
+        if (nc.isTCP()) {
+            forwarder = new TCPForwarder(outbound);
+        } else if (nc.isUDP()) {
+            forwarder = new UDPForwarder(outbound);
+        }
+        return forwarder;
+    }
+
+    private Forwarder getForwarder(final NetworkConnection nc) {
+        Forwarder forwarder = forwarders.get(nc);
+        if (forwarder == null) {
+            forwarder = createForwarder(nc);
+
+            try {
+                forwarder.connect(nc.dest);
+                forwarders.put(nc, forwarder);
+            } catch (IOException e) {
+                Log.e(TAG, "Error connecting forward", e);
+                forwarder = null;
+            }
+
+        }
+        return forwarder;
+    }
+
+    private void forwardPacket(final IPv4Packet packet) throws IOException {
+        final NetworkConnection nc = NetworkConnection.fromPacket(packet);
+        if (nc != null) {
+            final Forwarder forwarder = getForwarder(nc);
+            if (forwarder != null)
+                forwarder.forward(packet);
         } else {
-         Log.d(TAG, String.format("dropping unhandled packet for protocol = %s", packet.getProtocol()));
+            Log.d(TAG, String.format("dropping unhandled packet for protocol = %s", packet.getProtocol()));
         }
-    }
-
-    private void forwardTCPPacket(final IPv4Packet ipPacket) {
-        final TCPPacket packet = ipPacket.getTCPPayload();
-
-        final byte[] src = new byte[4];
-        ipPacket.getSource(src);
-
-        byte[] dest = new byte[4];
-        ipPacket.getDest(dest);
-
-        if (packet.isSyn()) {
-            Log.d(TAG, String.format("tcp syn %s:%s -> %s:%s", ipPacket.formatAddress(src), packet.getSourcePort(), ipPacket.formatAddress(dest), packet.getDestPort()));
-        } else if (packet.isFin()) {
-            Log.d(TAG, String.format("tcp fin %s:%s -> %s:%s", ipPacket.formatAddress(src), packet.getSourcePort(), ipPacket.formatAddress(dest), packet.getDestPort()));
-        } else if (packet.isRst()) {
-            Log.d(TAG, String.format("tcp rst %s:%s -> %s:%s", ipPacket.formatAddress(src), packet.getSourcePort(), ipPacket.formatAddress(dest), packet.getDestPort()));
-        }
-    }
-
-    private void forwardUDPPacket(final IPv4Packet ipPacket) {
-        final UDPPacket packet = ipPacket.getUDPPayload();
-        final byte[] src = new byte[4];
-        ipPacket.getSource(src);
-
-        byte[] dest = new byte[4];
-        ipPacket.getDest(dest);
-
-        Log.d(TAG, String.format("forward udp packet %s:%s -> %s:%s", ipPacket.formatAddress(src), packet.getSourcePort(), ipPacket.formatAddress(dest), packet.getDestPort()));
     }
 
     void readPacket(final FileInputStream in, final IPv4Packet packet) throws IOException {
@@ -101,16 +113,19 @@ public class NetworkCaptureService extends VpnService {
 
     class CaptureThread extends Thread {
 
+        private final ParcelFileDescriptor iface;
         boolean capturing;
+
+        public CaptureThread(final ParcelFileDescriptor iface) {
+            this.iface = iface;
+        }
 
         @Override
         public void run() {
 
-            final ParcelFileDescriptor iface = configure();
             final FileInputStream in = new FileInputStream(iface.getFileDescriptor());
-            final FileOutputStream out = new FileOutputStream(iface.getFileDescriptor());
 
-            final ByteBuffer buffer = ByteBuffer.allocate(65535);
+            final ByteBuffer buffer = ByteBuffer.allocate(IPv4Packet.MAX_SIZE);
             buffer.order(ByteOrder.BIG_ENDIAN);
 
             final IPv4Packet IPv4Packet = new IPv4Packet(buffer);
@@ -121,6 +136,7 @@ public class NetworkCaptureService extends VpnService {
                     readPacket(in, IPv4Packet);
                 } catch (IOException e) {
                     Log.e(TAG, "error reading input from interface", e);
+                    capturing = false;
                 }
             }
 
@@ -131,4 +147,34 @@ public class NetworkCaptureService extends VpnService {
             }
         }
     }
+
+    class WriterThread extends Thread {
+
+        private boolean writing;
+        private final ParcelFileDescriptor iface;
+        private final BlockingQueue<IPv4Packet> queue;
+
+        public WriterThread(final ParcelFileDescriptor iface, final BlockingQueue<IPv4Packet> queue) {
+            this.iface = iface;
+            this.queue = queue;
+        }
+
+        @Override
+        public void run() {
+
+            final FileOutputStream out = new FileOutputStream(iface.getFileDescriptor());
+
+            writing = true;
+            while (writing) {
+                try {
+                    final IPv4Packet packet = queue.take();
+                    out.write(packet.getBuffer().array(), 0, packet.getBuffer().limit());
+                } catch (InterruptedException | IOException e) {
+                    Log.e(TAG, "Error writing outbound packet", e);
+                    writing = false;
+                }
+            }
+        }
+    }
 }
+

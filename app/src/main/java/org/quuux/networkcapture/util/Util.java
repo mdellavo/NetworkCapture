@@ -1,4 +1,4 @@
-package org.quuux.networkcapture;
+package org.quuux.networkcapture.util;
 
 public class Util {
     public static String toHexString(byte[] bytes, int limit) {
