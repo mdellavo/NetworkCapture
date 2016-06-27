@@ -2,6 +2,8 @@ package org.quuux.networkcapture.net;
 
 import android.util.Log;
 
+import org.quuux.networkcapture.util.Util;
+
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
@@ -33,7 +35,7 @@ public class IPv4Packet extends Packet {
     }
 
     public int getVersion() {
-        return buffer.get(0) >> 4;
+        return buffer.get(0) >>> 4;
     }
 
     public int getIHL() {
@@ -66,7 +68,7 @@ public class IPv4Packet extends Packet {
     }
 
     public int getFlags() {
-        return (buffer.get(6) >> 1) & 0x07;
+        return (buffer.get(6) >>> 1) & 0x07;
     }
 
     public int getFragOffset() {
@@ -91,7 +93,7 @@ public class IPv4Packet extends Packet {
 
     public void setChecksum() {
         buffer.putShort(10, (short) 0);
-        long checksum = calculateChecksum(buffer.array(), getHeaderSize());
+        long checksum = Util.calculateChecksum(buffer.array(), getHeaderSize());
         buffer.putShort(10, (short) checksum);
     }
 
@@ -132,7 +134,7 @@ public class IPv4Packet extends Packet {
 
     public InetAddress getDestAddress() {
         final byte[] addr = new byte[4];
-        getSource(addr);
+        getDest(addr);
         try {
             return InetAddress.getByAddress(addr);
         } catch (UnknownHostException e) {

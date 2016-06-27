@@ -11,11 +11,11 @@ public class UDPPacket extends Packet {
     }
 
     public int getSourcePort() {
-        return buffer.getShort(0);
+        return buffer.getShort(0) & 0xffff;
     }
 
     public int getDestPort() {
-        return buffer.getShort(2);
+        return buffer.getShort(2) & 0xffff;
     }
 
     public int getLength() {

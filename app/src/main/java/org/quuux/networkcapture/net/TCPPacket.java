@@ -1,5 +1,7 @@
 package org.quuux.networkcapture.net;
 
+import org.quuux.networkcapture.util.Util;
+
 import java.nio.ByteBuffer;
 
 public class TCPPacket extends Packet{
@@ -20,6 +22,16 @@ public class TCPPacket extends Packet{
 
     public TCPPacket(final ByteBuffer buffer) {
         super(buffer);
+    }
+
+    public int getHeaderSize() {
+        return getDataOffset() * 4;
+    }
+
+    @Override
+    public String inspect() {
+        return String.format("TCP: src port=%s / dest port=%s / seq=%s / ack=%s / data offset=%s / flags=%s",
+                getSourcePort(), getDestPort(), getSeqNumber(), getAckNumber(), getDataOffset(), Integer.toBinaryString(getFlags()));
     }
 
     public void setSourcePort(short src) {
@@ -60,11 +72,11 @@ public class TCPPacket extends Packet{
     }
 
     public int getDataOffset() {
-        return buffer.get(12) >> 4;
+        return (buffer.get(12) & 0xff) >>> 4;
     }
 
     public int getFlags() {
-        return buffer.getInt(12) & 0x1ff;
+        return buffer.getShort(12) & 0x1ff;
     }
 
     public boolean isSet(final int flag) {
@@ -107,13 +119,54 @@ public class TCPPacket extends Packet{
         return isSet(Flags.NS);
     }
 
-    public int getHeaderSize() {
-        return getDataOffset() * 4;
+    public void setWindowSize(short windowSize) {
+        buffer.putShort(14, windowSize);
     }
 
-    @Override
-    public String inspect() {
-        return String.format("TCP: src port=%s / dest port=%s", getSourcePort(), getDestPort());
+    public short getWindowSize() {
+        return buffer.getShort(14);
     }
 
+    public void setChecksum(final IPv4Packet ipPacket) {
+        buffer.putShort(16, (short) 0);
+
+        int ipSegmentSize = ipPacket.getLength() - ipPacket.getHeaderSize();
+        int tcpSegmentSize = ipSegmentSize - getHeaderSize();
+        int pseudoSegmentSize = ipSegmentSize + 12;
+        final ByteBuffer pseudoBuffer = ByteBuffer.allocate(pseudoSegmentSize);
+
+        // write pseudo header
+        byte[] addr = new byte[4];
+        ipPacket.getSource(addr);
+
+        for (int i=0; i<4; i++)
+            pseudoBuffer.put(i, addr[i]);
+
+        ipPacket.getDest(addr);
+        for (int i=0; i<4; i++)
+            pseudoBuffer.put(4 + i, addr[i]);
+
+        pseudoBuffer.put(9, (byte) (ipPacket.getProtocol() & 0xff));
+        pseudoBuffer.putShort(10, (short) tcpSegmentSize);
+
+        // copy tcp header + segment
+        pseudoBuffer.position(12);
+        pseudoBuffer.put(buffer.array(), 0, ipSegmentSize);
+        pseudoBuffer.position(0);
+
+        long checksum = Util.calculateChecksum(pseudoBuffer.array(), pseudoSegmentSize);
+        buffer.putShort(16, (short) checksum);
+    }
+
+    public short getChecksum() {
+        return buffer.getShort(16);
+    }
+
+    public void setUrgentPointer(short urgentPointer) {
+        buffer.putShort(18, urgentPointer);
+    }
+
+    public short getUrgentPointer() {
+        return buffer.getShort(18);
+    }
 }

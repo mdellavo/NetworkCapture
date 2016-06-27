@@ -1,6 +1,7 @@
 package org.quuux.networkcapture;
 
 import android.content.Intent;
+import android.net.ConnectivityManager;
 import android.net.VpnService;
 import android.os.ParcelFileDescriptor;
 import android.util.Log;
@@ -14,8 +15,13 @@ import org.quuux.networkcapture.net.UDPForwarder;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
@@ -26,8 +32,9 @@ public class NetworkCaptureService extends VpnService {
 
     private static final String TAG = "NetworkCaptureService";
 
-    BlockingQueue<IPv4Packet> outbound = new LinkedBlockingQueue<>();
+    private static final String VIRTUAL_ADDRESS = "10.0.0.1";
 
+    BlockingQueue<IPv4Packet> outbound = new LinkedBlockingQueue<>();
     CaptureThread captureThread;
     WriterThread writerThread;
     Map<NetworkConnection, Forwarder> forwarders = new HashMap<>();
@@ -35,6 +42,8 @@ public class NetworkCaptureService extends VpnService {
 
     @Override
     public int onStartCommand(final Intent intent, final int flags, final int startId) {
+
+        final ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
 
         iface = configure();
 
@@ -49,26 +58,31 @@ public class NetworkCaptureService extends VpnService {
 
     private ParcelFileDescriptor configure() {
         return new VpnService.Builder()
-                .addAddress("10.0.0.1", 24)
+                .addAddress(VIRTUAL_ADDRESS, 24)
                 .addRoute("0.0.0.0", 0)
-                .addDnsServer("8.8.8.8")
-                .addDnsServer("8.8.4.4")
+                //.addDnsServer("8.8.8.8")
+                //.addDnsServer("8.8.4.4")
                 .setSession("capture")
                 .establish();
     }
 
     private void inspectPacket(final IPv4Packet packet) {
-        Log.d(TAG, "HEX:" + packet.toHex());
+        //Log.d(TAG, "HEX:" + packet.toHex());
         Log.d(TAG, packet.inspect());
     }
 
     private Forwarder createForwarder(final NetworkConnection nc) {
         Forwarder forwarder = null;
         if (nc.isTCP()) {
-            forwarder = new TCPForwarder(outbound);
+            forwarder = new TCPForwarder(getUpstream(), outbound);
+            if (!protect(((TCPForwarder)forwarder).socket))
+                Log.e(TAG, String.format("could not protect socket for connection %s", nc));
         } else if (nc.isUDP()) {
-            forwarder = new UDPForwarder(outbound);
+            forwarder = new UDPForwarder(getUpstream(), outbound);
+            if (!protect(((UDPForwarder)forwarder).socket))
+                Log.e(TAG, String.format("could not protect socket for connection %s", nc));
         }
+
         return forwarder;
     }
 
@@ -100,15 +114,30 @@ public class NetworkCaptureService extends VpnService {
         }
     }
 
-    void readPacket(final FileInputStream in, final IPv4Packet packet) throws IOException {
+    int readPacket(final FileInputStream in, final IPv4Packet packet) throws IOException {
         final ByteBuffer buffer = packet.getBuffer();
         int length = in.read(buffer.array(), 0, buffer.capacity());
         buffer.limit(length);
-        if (length > 0) {
-            //inspectPacket(packet);
-            forwardPacket(packet);
+        return length;
+    }
+
+    private InetAddress getUpstream() {
+        try {
+            for (Enumeration<NetworkInterface> en = NetworkInterface.getNetworkInterfaces(); en.hasMoreElements();) {
+                NetworkInterface intf = en.nextElement();
+                for (Enumeration<InetAddress> enumIpAddr = intf.getInetAddresses(); enumIpAddr.hasMoreElements(); ) {
+                    InetAddress inetAddress = enumIpAddr.nextElement();
+                    if (!inetAddress.isLoopbackAddress() && inetAddress instanceof Inet4Address && !inetAddress.getHostAddress().equals(VIRTUAL_ADDRESS)) {
+                        Log.d(TAG, String.format("upstream ip address is %s", inetAddress));
+                        return inetAddress;
+                    }
+                }
+            }
+        } catch (SocketException e) {
+            Log.e(TAG, "error getting network interfaces", e);
         }
-        buffer.clear();
+
+        return null;
     }
 
     class CaptureThread extends Thread {
@@ -128,17 +157,23 @@ public class NetworkCaptureService extends VpnService {
             final ByteBuffer buffer = ByteBuffer.allocate(IPv4Packet.MAX_SIZE);
             buffer.order(ByteOrder.BIG_ENDIAN);
 
-            final IPv4Packet IPv4Packet = new IPv4Packet(buffer);
+            final IPv4Packet packet = new IPv4Packet(buffer);
 
             capturing = true;
             while (capturing) {
                 try {
-                    readPacket(in, IPv4Packet);
+                    int length = readPacket(in, packet);
+                    if (length > 0) {
+                        inspectPacket(packet);
+                        forwardPacket(packet);
+                        packet.clear();
+                    }
                 } catch (IOException e) {
                     Log.e(TAG, "error reading input from interface", e);
                     capturing = false;
                 }
             }
+
 
             try {
                 iface.close();

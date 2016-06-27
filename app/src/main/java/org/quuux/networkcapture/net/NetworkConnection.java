@@ -25,6 +25,11 @@ public class NetworkConnection {
         return 7 * protocol * src.hashCode() * dest.hashCode();
     }
 
+    @Override
+    public String toString() {
+        return String.format("NetworkConnection(%s)", format());
+    }
+
     public String format() {
         return String.format("%s:%s -> %s:%s", src.getHostName(), src.getPort(), dest.getHostName(), dest.getPort());
     }
